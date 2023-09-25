@@ -1,0 +1,22 @@
+[package]
+name = "relink"
+version.workspace = true
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+testutils = ["dep:rand", "dep:ed25519-dalek"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+hex-slice = "0.1.4"
+ed25519-dalek = { version = "2.0.0", features = ["rand_core"], optional = true }
+rand = { version = "0.8.5", optional = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+ed25519-dalek = { version = "*", features = ["rand_core"] }
+rand = "*"
