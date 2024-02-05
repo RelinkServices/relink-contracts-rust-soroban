@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, symbol_short, Address, Env};
+use soroban_sdk::{contracttype, symbol_short, Address, BytesN, Env, Vec};
 
 use relink::RequestId;
 
@@ -21,14 +21,14 @@ pub struct RandomnessRequestData {
 /// );
 pub(crate) fn randomness_requested(
     env: &Env,
-    user: Address,
+    origin: Address,
     dapp: Address,
     nonce: u128,
     id: RequestId,
     request_confirmations: u32,
     num_words: u32,
 ) {
-    let topics = (symbol_short!("request"), user, dapp, nonce);
+    let topics = (symbol_short!("request"), origin, dapp, nonce);
     env.events().publish(
         topics,
         RandomnessRequestData {
@@ -37,6 +37,16 @@ pub(crate) fn randomness_requested(
             num_words,
         },
     );
+}
+
+pub(crate) fn randomness_provided(env: &Env, id: RequestId, random_words: Vec<BytesN<32>>) {
+    let topics = (symbol_short!("response"), id);
+    env.events().publish(topics, random_words);
+}
+
+pub(crate) fn fee_set(env: &Env, fee: i128) {
+    let topics = (symbol_short!("fee_set"), fee);
+    env.events().publish(topics, ());
 }
 
 pub(crate) fn whitelist_address_added(env: &Env, address: Address) {

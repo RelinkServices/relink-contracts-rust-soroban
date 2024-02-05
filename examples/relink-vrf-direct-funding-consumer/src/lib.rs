@@ -1,12 +1,11 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Map, Vec};
+use soroban_sdk::{contract, contractimpl, Address, BytesN, Env, Vec};
 
-use relink::{consumer, Error, RequestId, VrfDirectFundingConsumer};
+use relink::{consumer, Error, EthAddress, RequestId, VrfDirectFundingConsumer};
 
 mod events;
 mod storage;
-mod test;
 
 #[contract]
 pub struct VrfDirectFundingConsumerExample;
@@ -14,7 +13,7 @@ pub struct VrfDirectFundingConsumerExample;
 #[contractimpl]
 impl VrfDirectFundingConsumerExample {
     /// Initialize contract by setting the proxy address and trusted oracles.
-    pub fn initialize(env: Env, proxy: Address, threshold: u32, oracles: Vec<BytesN<32>>) {
+    pub fn initialize(env: Env, proxy: Address, threshold: u32, oracles: Vec<EthAddress>) {
         consumer::init(&env, &proxy, threshold, oracles);
     }
 
@@ -33,14 +32,13 @@ impl VrfDirectFundingConsumer for VrfDirectFundingConsumerExample {
     fn verify_and_fulfill_randomness(
         env: Env,
         id: RequestId,
-        request_origin: Address,
         random_words: Vec<BytesN<32>>,
-        signatures: Map<BytesN<32>, BytesN<64>>,
+        signatures: Vec<(BytesN<64>, u32)>,
     ) -> Result<(), Error> {
         // check if RequestId exists
         storage::has_request_id(&env, id.clone())?;
         // verify signatures
-        consumer::verify_randomness(&env, &id, &request_origin, &random_words, &signatures)?;
+        consumer::verify_randomness(&env, &id, &random_words, &signatures)?;
         // remove request as it should only be handled once
         storage::remove_request_id(&env, id.clone());
         // emit event containing the provided random words

@@ -1,15 +1,18 @@
 #![no_std]
 
-use soroban_sdk::{contractclient, contracterror, Address, BytesN, Env, Map, Vec};
+use soroban_sdk::{contractclient, contracterror, Address, BytesN, Env, Vec};
 
 pub use confirmed_owner::ConfirmedOwner;
+pub use eth_address::EthAddress;
 pub use request_id::RequestId;
 
 pub mod confirmed_owner;
 pub mod consumer;
+mod eth_address;
 mod events;
 mod request_id;
 pub mod testutils;
+pub mod utils;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -20,9 +23,7 @@ pub enum Error {
     UnauthorizedBackend = 3,
     TooFewSignatures = 4,
     UnauthorizedOracleSignatures = 5,
-    // InsufficientGasForConsumer = 1,
-    // ZeroAddress = 3,
-    // RequestAlreadyHandled = 4,
+    UnorderedOracles = 6,
 }
 
 #[contractclient(name = "VrfDirectFundingProxyClient")]
@@ -41,10 +42,9 @@ pub trait VrfDirectFundingProxy {
     fn callback_with_randomness(
         env: Env,
         backend: Address,
-        request_origin: Address,
         id: RequestId,
         random_words: Vec<BytesN<32>>,
-        signatures: Map<BytesN<32>, BytesN<64>>,
+        signatures: Vec<(BytesN<64>, u32)>,
     ) -> Result<(), Error>;
 }
 
@@ -53,8 +53,7 @@ pub trait VrfDirectFundingConsumer {
     fn verify_and_fulfill_randomness(
         env: Env,
         id: RequestId,
-        request_origin: Address,
         random_words: Vec<BytesN<32>>,
-        signatures: Map<BytesN<32>, BytesN<64>>,
+        signatures: Vec<(BytesN<64>, u32)>,
     ) -> Result<(), Error>;
 }

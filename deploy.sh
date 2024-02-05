@@ -1,15 +1,12 @@
 #!/bin/bash
 
 if [ $# == 0 ]; then
-  echo "please provide the source account and network, e.g.: --source alice --network futurenet"
+  echo "please provide the source account and network, e.g.: --network futurenet --source alice"
   echo "note: the source identity used needs to created and funded to run this"
   exit 1
 fi
 
 set -ex
-
-# make sure contract builds are up to date
-soroban contract build
 
 # make sure the native token wrapper contract exists (ignore error if it already exists)
 soroban lab token wrap --asset native "$@" || true
@@ -19,15 +16,15 @@ TOKEN_ADDRESS=$(soroban lab token id --asset native "$@")
 echo "export TOKEN_ADDRESS=$TOKEN_ADDRESS"
 
 # deploy proxy
-PROXY_ADDRESS=$(soroban contract deploy "$@" --wasm target/wasm32-unknown-unknown/release/relink_vrf_direct_funding_proxy.wasm)
+PROXY_ADDRESS=$(soroban contract deploy "$@" --wasm target/wasm32-unknown-unknown/release/relink_vrf_direct_funding_proxy.optimized.wasm)
 echo "export PROXY_ADDRESS=$PROXY_ADDRESS"
 
 # deploy consumer
-CONSUMER_ADDRESS=$(soroban contract deploy "$@" --wasm target/wasm32-unknown-unknown/release/relink_vrf_consumer_example.wasm)
+CONSUMER_ADDRESS=$(soroban contract deploy "$@" --wasm target/wasm32-unknown-unknown/release/relink_vrf_direct_funding_consumer.optimized.wasm)
 echo "export CONSUMER_ADDRESS=$CONSUMER_ADDRESS"
 
 # initialize proxy
-soroban contract invoke --id $PROXY_ADDRESS "$@" -- initialize --owner alice --token $TOKEN_ADDRESS
+soroban contract invoke --id $PROXY_ADDRESS "$@" -- initialize --owner alice --token $TOKEN_ADDRESS --fee 10
 echo "# proxy initialized"
 
 # add "backend" to the backend whitelist

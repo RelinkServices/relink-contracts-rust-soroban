@@ -1,4 +1,6 @@
-use soroban_sdk::{symbol_short, Address, BytesN, Env};
+use soroban_sdk::{symbol_short, Address, Env};
+
+use crate::EthAddress;
 
 pub fn ownership_transfer_requested(env: &Env, from: &Address, to: &Address) {
     let topics = (symbol_short!("owner_req"), from, to);
@@ -15,12 +17,12 @@ pub fn threshold_set(env: &Env, threshold: u32) {
     env.events().publish(topics, ());
 }
 
-pub fn oracle_added(env: &Env, pub_key: BytesN<32>) {
-    let topics = (symbol_short!("oracle_ad"), pub_key);
+pub fn oracle_added(env: &Env, oracle: EthAddress) {
+    let topics = (symbol_short!("oracle_ad"), oracle);
     env.events().publish(topics, ());
 }
 
-pub fn oracle_removed(env: &Env, pub_key: BytesN<32>) {
-    let topics = (symbol_short!("oracle_rm"), pub_key);
+pub fn oracle_removed(env: &Env, oracle: EthAddress) {
+    let topics = (symbol_short!("oracle_rm"), oracle);
     env.events().publish(topics, ());
 }

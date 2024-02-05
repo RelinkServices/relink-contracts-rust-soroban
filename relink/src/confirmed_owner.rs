@@ -1,5 +1,6 @@
-use crate::events;
 use soroban_sdk::{contractclient, contracttype, Address, Env};
+
+use crate::events;
 
 #[contractclient(name = "ConfirmedOwnerClient")]
 pub trait ConfirmedOwner {
@@ -155,7 +156,7 @@ mod test {
     fn init() {
         let (env, _, client) = setup();
         // initialize test contract
-        let alice = Address::random(&env);
+        let alice = Address::generate(&env);
         client.init(&alice);
         assert_eq!(client.owner(), alice);
     }
@@ -165,7 +166,7 @@ mod test {
     fn reinit() {
         let (env, _, client) = setup();
         // initialize contract
-        let alice = Address::random(&env);
+        let alice = Address::generate(&env);
         client.init(&alice);
         // initializing again should fail
         client.init(&alice);
@@ -175,7 +176,7 @@ mod test {
     fn authorization() {
         let (env, contract_address, client) = setup();
         // initialize contract
-        let alice = Address::random(&env);
+        let alice = Address::generate(&env);
         client.init(&alice);
 
         // call a non-privileged method
@@ -184,7 +185,7 @@ mod test {
         assert_eq!(env.auths(), std::vec![]);
 
         // call a privileged method
-        let bob = Address::random(&env);
+        let bob = Address::generate(&env);
         client.signed_caller(&bob);
         // verify that the bob's signature was checked
         assert_eq!(
@@ -239,13 +240,13 @@ mod test {
     fn transfer() {
         let (env, contract_address, client) = setup();
         // initialize contract
-        let alice = Address::random(&env);
+        let alice = Address::generate(&env);
         client.init(&alice);
         // make sure alice is the current owner
         assert_eq!(client.owner(), alice);
 
         // transfer ownership to bob
-        let bob = Address::random(&env);
+        let bob = Address::generate(&env);
         client.transfer_ownership(&bob);
         // verify that the owner's signature was checked
         assert_eq!(

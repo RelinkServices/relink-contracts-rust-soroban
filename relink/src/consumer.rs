@@ -1,7 +1,7 @@
-use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{bytes, contracttype, Address, Bytes, BytesN, Env, Map, Vec};
+use soroban_sdk::{bytes, contracttype, Address, Bytes, BytesN, Env, Vec};
 
-use crate::{events, Error, RequestId, VrfDirectFundingProxyClient};
+use crate::utils::address_bytes;
+use crate::{events, Error, EthAddress, RequestId, VrfDirectFundingProxyClient};
 
 #[derive(Clone)]
 #[contracttype]
@@ -9,10 +9,10 @@ pub enum DataKeyConsumer {
     DomainSeparator,
     Proxy,
     Threshold,
-    Oracle(BytesN<32>),
+    Oracle(EthAddress),
 }
 
-pub fn init(env: &Env, proxy: &Address, threshold: u32, oracles: Vec<BytesN<32>>) {
+pub fn init(env: &Env, proxy: &Address, threshold: u32, oracles: Vec<EthAddress>) {
     if has_proxy(&env) {
         panic!("already initialized")
     }
@@ -64,24 +64,24 @@ pub fn get_threshold(env: &Env) -> u32 {
         .unwrap()
 }
 
-pub fn add_oracle(env: &Env, pub_key: BytesN<32>) {
+pub fn add_oracle(env: &Env, oracle: EthAddress) {
     env.storage()
         .instance()
-        .set(&DataKeyConsumer::Oracle(pub_key.clone()), &());
-    events::oracle_added(env, pub_key);
+        .set(&DataKeyConsumer::Oracle(oracle.clone()), &());
+    events::oracle_added(env, oracle);
 }
 
-pub fn remove_oracle(env: &Env, pub_key: BytesN<32>) {
+pub fn remove_oracle(env: &Env, oracle: EthAddress) {
     env.storage()
         .instance()
-        .remove(&DataKeyConsumer::Oracle(pub_key.clone()));
-    events::oracle_removed(env, pub_key);
+        .remove(&DataKeyConsumer::Oracle(oracle.clone()));
+    events::oracle_removed(env, oracle);
 }
 
-pub fn has_oracle(env: &Env, pub_key: BytesN<32>) -> bool {
+pub fn has_oracle(env: &Env, oracle: EthAddress) -> bool {
     env.storage()
         .instance()
-        .has(&DataKeyConsumer::Oracle(pub_key))
+        .has(&DataKeyConsumer::Oracle(oracle))
 }
 
 /// Implement Solidity equivalent domain separator:
@@ -96,20 +96,20 @@ pub fn has_oracle(env: &Env, pub_key: BytesN<32>) -> bool {
 ///     )
 /// );
 pub fn domain_separator(env: &Env, contract: &Address) -> BytesN<32> {
-    // SHA256 of "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)"
+    // Keccak256 of "EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)"
     let prefix_hash = bytes!(
         env,
-        0xad6c7f80cec084c59e505f24c9b5948b5dacc8024a22c878de1f6834e81414b6
+        0xd87cd6ef79d4e2b95e15ce8abf732db51ec771f1ca2edccf22a46c729ac56472
     );
-    // SHA256 of "Relink MultiSig"
+    // Keccak256 of "Relink MultiSig"
     let name_hash = bytes!(
         env,
-        0xa31ec8c002de82e32efa9ce1f5ec1e3d5109aacaae80ce0ee2bf905157da92f7
+        0x615770db9463494f4a7a0575fdd7fbbbdd2ac99f24e8a7960d5bd346cfa1dbf7
     );
-    // SHA256 of "1"
+    // Keccak256 of "1"
     let version_hash = bytes!(
         env,
-        0x6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b
+        0xc89efdaa54c0f20c7adf612882df0950f5a951637e0307cdcb4c672f298b8bc6
     );
     let salt = bytes!(
         env,
@@ -119,40 +119,39 @@ pub fn domain_separator(env: &Env, contract: &Address) -> BytesN<32> {
     domain.append(&prefix_hash);
     domain.append(&name_hash);
     domain.append(&version_hash);
-    domain.append(&env.ledger().network_id().to_xdr(env));
-    domain.append(&contract.to_xdr(env));
+    domain.append(env.ledger().network_id().as_ref());
+    domain.append(&address_bytes(env, &contract));
     domain.append(&salt);
-    env.crypto().sha256(&domain)
+    env.crypto().keccak256(&domain)
 }
 
 /// Implement Solidity equivalent tx input hash:
 /// bytes32 txInputHash = keccak256(
 ///     abi.encode(
 ///         RANDOMNESS_RECEIVED_HASH,
-///         requestOrigin,
-///         chainId,
 ///         requestId,
 ///         keccak256(abi.encodePacked(randomWords))
 ///     )
 /// );
-pub fn tx_input_hash(
-    env: &Env,
-    id: &RequestId,
-    request_origin: &Address,
-    random_words: &Vec<BytesN<32>>,
-) -> BytesN<32> {
-    // SHA256 of "ProxyRequest(address requestOrigin,uint256 chainId,bytes32 requestId,uint256[] randomWords)"
+pub fn tx_input_hash(env: &Env, id: &RequestId, random_words: &Vec<BytesN<32>>) -> BytesN<32> {
+    // Keccak256 of "ProxyRequest(bytes32 requestId,uint256[] randomWords)"
     let prefix_hash = bytes!(
         env,
-        0x55e5bc5c207cdaeab0f33b0afe4f990bb61a2d7d5e5691377ccb179eaf41463e
+        0x910684821c06c34275feee35f4ae2d80136d3b2e7366d0795b2eb4116d82ac07
     );
-    let mut tx_input = Bytes::new(env);
-    tx_input.append(&prefix_hash);
-    tx_input.append(&request_origin.to_xdr(env));
-    tx_input.append(&env.ledger().network_id().to_xdr(env));
-    tx_input.append(id.as_bytes().as_ref());
-    tx_input.append(&random_words.clone().to_xdr(env));
-    env.crypto().sha256(&tx_input)
+    let crypto = env.crypto();
+    // hash the random words
+    let mut buffer = Bytes::new(env);
+    for word in random_words.iter() {
+        buffer.append(word.as_ref());
+    }
+    let random_words_hash = crypto.keccak256(&buffer);
+    // hash the tx inputs
+    let mut buffer = Bytes::new(env);
+    buffer.append(&prefix_hash);
+    buffer.append(id.as_bytes().as_ref());
+    buffer.append(random_words_hash.as_ref());
+    crypto.keccak256(&buffer)
 }
 
 pub fn request_randomness(
@@ -178,9 +177,8 @@ pub fn request_randomness(
 pub fn verify_randomness(
     env: &Env,
     id: &RequestId,
-    request_origin: &Address,
     random_words: &Vec<BytesN<32>>,
-    signatures: &Map<BytesN<32>, BytesN<64>>,
+    signatures: &Vec<(BytesN<64>, u32)>,
 ) -> Result<(), Error> {
     // must be called by the proxy
     get_proxy(env).require_auth();
@@ -193,21 +191,31 @@ pub fn verify_randomness(
     // bytes32 totalHash = keccak256(
     //     abi.encodePacked("\x19\x01", domainSeparator, txInputHash)
     // );
-    let mut msg = Bytes::new(env);
-    // TODO: do we also need a prefix like \x19\x01 on Ethereum
+    let mut msg = Bytes::from_array(env, &[0x19, 0x01]);
     msg.append(get_domain_separator(env).as_ref());
-    msg.append(tx_input_hash(env, id, request_origin, random_words).as_ref());
+    msg.append(tx_input_hash(env, id, random_words).as_ref());
     let crypto = env.crypto();
-    // note: signatures is a Map with the pub_keys as keys,
-    // which guarantees that only one signature is provided per oracle
-    let valid = signatures
-        .iter()
-        // keep only permitted oracles
-        .filter(|(pub_key, _)| has_oracle(env, pub_key.clone()))
-        // validate oracle signatures, this will panic on invalid signatures
-        .map(|(pub_key, signature)| crypto.ed25519_verify(&pub_key, &msg, &signature))
-        .count();
-    if valid < threshold as usize {
+    let msg_digest = crypto.keccak256(&msg);
+    // validate oracle signatures, recovering the addresses in the process, this will panic on invalid signatures
+    let mut valid: u32 = 0;
+    let mut last = EthAddress::zero(env);
+    for (signature, recovery_id) in signatures.iter() {
+        let pub_key = crypto.secp256k1_recover(&msg_digest, &signature, recovery_id);
+        // convert pub key to ethereum address (hash the raw pub key and take the last 20 bytes)
+        let recovered = EthAddress::from_sec1_pub_key(env, &pub_key);
+        // if the same address is used multiple times, fail
+        if recovered <= last {
+            return Err(Error::UnorderedOracles);
+        }
+        // check if the computed address is included in the permitted oracles list
+        if has_oracle(env, recovered.clone()) {
+            // address is a part of the permitted oracles list, increase verified signature counter
+            valid += 1;
+            // count valid signatures
+            last = recovered;
+        }
+    }
+    if valid < threshold {
         return Err(Error::UnauthorizedOracleSignatures);
     }
     Ok(())
@@ -217,49 +225,57 @@ pub fn verify_randomness(
 mod test {
     extern crate alloc;
 
+    use soroban_sdk::testutils::arbitrary::std::println;
+    use soroban_sdk::testutils::Address as AddressTestTrait;
+    use soroban_sdk::{Address, BytesN, Env};
+
     use crate::consumer::domain_separator;
     use crate::testutils::{hash_hex, hash_u8};
-    use soroban_sdk::arbitrary::std::println;
-    use soroban_sdk::{bytesn, Address, Env};
 
     /// Precompute values used in domain_separator().
     #[test]
-    pub fn precompute_hashes() {
+    fn precompute_hashes() {
         let env = Env::default();
         let domain_prefix = b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract,bytes32 salt)";
         println!("EIP712DOMAINTYPE_HASH: {}", hash_u8(&env, domain_prefix));
         println!("NAME_HASH: {}", hash_u8(&env, b"Relink MultiSig"));
         println!("VERSION_HASH: {}", hash_u8(&env, b"1"));
-        let signature_prefix = b"ProxyRequest(address requestOrigin,uint256 chainId,bytes32 requestId,uint256[] randomWords)";
+        let signature_prefix = b"ProxyRequest(bytes32 requestId,uint256[] randomWords)";
         println!(
             "RANDOMNESS_RECEIVED_HASH: {}",
             hash_u8(&env, signature_prefix)
         );
+        println!(
+            "Network ID: Futurenet = {}",
+            hash_u8(&env, b"Test SDF Future Network ; October 2022")
+        );
+        println!(
+            "Network ID: Testnet = {}",
+            hash_u8(&env, b"Test SDF Network ; September 2015")
+        );
+    }
+
+    /// Compute the domain separator with the given contract address and verify that it matches the
+    /// expected value in hex.
+    fn verify_domain_separator(address: &Address, expected_hex: &str) -> BytesN<32> {
+        let result = domain_separator(address.env(), address);
+        println!("domain separator: {}", hash_hex(&result));
+        assert_eq!(hash_hex(&result), expected_hex);
+        result
     }
 
     #[test]
-    pub fn verify_domain_separator() {
+    fn verify_domain_separators() {
         let env = Env::default();
-        let contract1 = Address::from_contract_id(&bytesn!(
-            &env,
-            0x0102030405060708091011121314151617181920212223242526272829303132
-        ));
-        let contract2 = Address::from_contract_id(&bytesn!(
-            &env,
-            0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-        ));
-        let result1 = domain_separator(&env, &contract1);
-        let result2 = domain_separator(&env, &contract2);
-        println!("domain separator 1: {}", hash_hex(&result1));
-        println!("domain separator 2: {}", hash_hex(&result2));
-        assert_ne!(result1, result2);
-        assert_eq!(
-            hash_hex(&result1),
-            "0x35aa8170289291943109a27eecc1286b9875b1551c9adfd5a9489a273024bc03"
+        let a = verify_domain_separator(
+            &Address::generate(&env),
+            "0x946a7d98c84e7d51a25c369f37e21091cef346c610a3eb9daeb942efc9012dc1",
         );
-        assert_eq!(
-            hash_hex(&result2),
-            "0x2840b5a1b6210913c6f8e48daf0b8c712e363a8d7c1ef23754adcaad2e32c032"
+        let b = verify_domain_separator(
+            &Address::generate(&env),
+            "0x56aa7c55e371e1c518f8cc4ffad1d25155aa8c30cf88d8e9a41bf5a219fbc9ea",
         );
+        // make sure that different contract addresses yield different domain separators
+        assert_ne!(a, b);
     }
 }

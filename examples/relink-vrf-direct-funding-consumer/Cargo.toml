@@ -1,14 +1,11 @@
 [package]
-name = "relink-vrf-consumer-example"
-version.workspace = true
+name = "relink-vrf-direct-funding-consumer"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 doctest = false
-
-[features]
-testutils = []
 
 [dependencies]
 soroban-sdk = { workspace = true }
@@ -17,4 +14,3 @@ relink = { workspace = true }
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 relink = { workspace = true, features = ["testutils"] }
-relink-vrf-direct-funding-proxy = { workspace = true, features = ["testutils"] }

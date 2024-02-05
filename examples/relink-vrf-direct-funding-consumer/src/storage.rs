@@ -2,7 +2,7 @@ use soroban_sdk::{contracttype, Env};
 
 use relink::{Error, RequestId};
 
-pub(crate) const REQUEST_BUMP_AMOUNT: u32 = 34560; // 2 days
+pub(crate) const REQUEST_TTL: u32 = 34560; // 2 days
 
 #[derive(Clone)]
 #[contracttype]
@@ -15,7 +15,7 @@ pub fn add_request_id(env: &Env, id: RequestId) {
     env.storage().temporary().set(&key, &());
     env.storage()
         .temporary()
-        .bump(&key, REQUEST_BUMP_AMOUNT, REQUEST_BUMP_AMOUNT);
+        .extend_ttl(&key, REQUEST_TTL, REQUEST_TTL);
 }
 
 pub fn has_request_id(env: &Env, id: RequestId) -> Result<(), Error> {

@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 extern crate std;
 
 use std::println;
@@ -12,7 +10,8 @@ use soroban_sdk::{
 
 use relink::RequestId;
 
-use crate::RelinkVrfDirectFundingProxyClient;
+use crate::events::RandomnessRequestData;
+use crate::{RelinkVrfDirectFundingProxy, RelinkVrfDirectFundingProxyClient};
 
 struct Setup<'a> {
     env: Env,
@@ -29,16 +28,16 @@ impl Setup<'_> {
         env.mock_all_auths();
 
         // Create the token contract
-        let token_owner = Address::random(&env);
+        let token_owner = Address::generate(&env);
         let (token, token_admin) = relink::testutils::create_token_contract(&env, &token_owner);
 
         // Create the proxy contract
-        let proxy_id = env.register_contract(None, crate::RelinkVrfDirectFundingProxy);
+        let proxy_id = env.register_contract(None, RelinkVrfDirectFundingProxy);
         let proxy = RelinkVrfDirectFundingProxyClient::new(&env, &proxy_id);
 
         // initialize proxy contract
-        let proxy_owner = Address::random(&env);
-        proxy.initialize(&proxy_owner, &token.address);
+        let proxy_owner = Address::generate(&env);
+        proxy.initialize(&proxy_owner, &token.address, &10);
 
         println!("token: {:?}", token.address);
         println!("token_owner: {:?}", token_owner);
@@ -61,7 +60,7 @@ impl Setup<'_> {
     }
 
     fn random_account(&self, initial_amount: &i128) -> Address {
-        let account = Address::random(&self.env);
+        let account = Address::generate(&self.env);
         self.fund_account(&account, initial_amount);
         account
     }
@@ -80,7 +79,7 @@ fn reinit() {
     let setup = Setup::new();
     setup
         .proxy
-        .initialize(&setup.proxy_owner, &setup.token.address)
+        .initialize(&setup.proxy_owner, &setup.token.address, &123);
 }
 
 #[test]
@@ -88,11 +87,11 @@ fn request_ids() {
     let setup = Setup::new();
     let proxy = &setup.proxy;
 
+    let origin = setup.random_account(&50);
     let dapp = setup.random_account(&0);
-    let user = setup.random_account(&50);
-    let id1 = proxy.request_randomness(&user, &10, &dapp, &2, &1);
-    let id2 = proxy.request_randomness(&user, &10, &dapp, &2, &1);
-    let id3 = proxy.request_randomness(&user, &10, &dapp, &2, &1);
+    let id1 = proxy.request_randomness(&origin, &10, &dapp, &2, &1);
+    let id2 = proxy.request_randomness(&origin, &10, &dapp, &2, &1);
+    let id3 = proxy.request_randomness(&origin, &10, &dapp, &2, &1);
 
     // make sure the request ids are not identical
     assert_ne!(id1, id2);
@@ -104,9 +103,9 @@ fn request_event() {
     let setup = Setup::new();
     let env = &setup.env;
 
+    let origin = setup.random_account(&50);
     let dapp = setup.random_account(&0);
-    let user = setup.random_account(&50);
-    let request_id = setup.proxy.request_randomness(&user, &10, &dapp, &2, &1);
+    let request_id = setup.proxy.request_randomness(&origin, &10, &dapp, &2, &1);
     println!("request id: {}", request_id);
 
     let mut proxy_events = Vec::new(env);
@@ -119,7 +118,8 @@ fn request_event() {
         .for_each(|event| proxy_events.push_back(event));
 
     let expected_nonce = 0_u128;
-    let expected_request_id = RequestId::new(env, &setup.proxy.address, expected_nonce);
+    let expected_request_id =
+        RequestId::new(env, &origin, &dapp, &setup.proxy.address, expected_nonce);
 
     assert_eq!(request_id, expected_request_id);
 
@@ -129,8 +129,8 @@ fn request_event() {
             env,
             (
                 setup.proxy.address.clone(),
-                (symbol_short!("request"), user, dapp, expected_nonce).into_val(env),
-                crate::events::RandomnessRequestData {
+                (symbol_short!("request"), origin, dapp, expected_nonce).into_val(env),
+                RandomnessRequestData {
                     id: expected_request_id,
                     request_confirmations: 2,
                     num_words: 1
@@ -147,29 +147,41 @@ fn balance() {
     let token = &setup.token;
     let proxy = &setup.proxy;
 
+    let origin1 = setup.random_account(&50);
+    let origin2 = setup.random_account(&100);
     let dapp = setup.random_account(&0);
-    let user1 = setup.random_account(&50);
-    let user2 = setup.random_account(&100);
 
-    assert_eq!(token.balance(&user1), 50);
-    assert_eq!(token.balance(&user2), 100);
+    assert_eq!(token.balance(&origin1), 50);
+    assert_eq!(token.balance(&origin2), 100);
     assert_eq!(token.balance(&proxy.owner()), 0);
     assert_eq!(token.balance(&proxy.address), 0);
 
-    proxy.request_randomness(&user1, &10, &dapp, &2, &1);
-    proxy.request_randomness(&user2, &25, &dapp, &2, &1);
-    proxy.request_randomness(&user2, &11, &dapp, &2, &1);
+    proxy.request_randomness(&origin1, &10, &dapp, &2, &1);
+    proxy.request_randomness(&origin2, &25, &dapp, &2, &5);
+    proxy.request_randomness(&origin2, &11, &dapp, &2, &10);
 
-    assert_eq!(token.balance(&user1), 40);
-    assert_eq!(token.balance(&user2), 64);
+    assert_eq!(token.balance(&origin1), 40);
+    assert_eq!(token.balance(&origin2), 64);
     assert_eq!(token.balance(&proxy.owner()), 0);
     assert_eq!(token.balance(&proxy.address), 46);
 
     // withdraw all tokens to the owner
     proxy.withdraw(&token.address);
 
-    assert_eq!(token.balance(&user1), 40);
-    assert_eq!(token.balance(&user2), 64);
+    assert_eq!(token.balance(&origin1), 40);
+    assert_eq!(token.balance(&origin2), 64);
     assert_eq!(token.balance(&proxy.owner()), 46);
     assert_eq!(token.balance(&proxy.address), 0);
+}
+
+#[test]
+#[should_panic(expected = "Maximum Random Values: 10")]
+fn max_words() {
+    let setup = Setup::new();
+    let proxy = &setup.proxy;
+
+    let origin = setup.random_account(&50);
+    let dapp = setup.random_account(&0);
+
+    proxy.request_randomness(&origin, &10, &dapp, &2, &11);
 }

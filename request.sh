@@ -1,17 +1,20 @@
 #!/bin/bash
 
-set -ex
+if [ $# == 0 ]; then
+  echo "please provide the source account and network, e.g.: --network futurenet --source bob"
+  echo "note: the source identity used needs to created and funded to run this"
+  exit 1
+fi
 
-source .soroban/testnet.env
+set -ex
 
 # initiate randomness request
 soroban contract invoke \
   --id $CONSUMER_ADDRESS \
-  --network testnet \
-  --source alice \
-  --fee 1000000 \
+  --fee 10000000 \
+  "$@" \
   -- initiate_randomness_request \
-    --origin alice \
-    --value 10
+    --origin bob \
+    --value 100
 
 echo randomness requested

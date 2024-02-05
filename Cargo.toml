@@ -3,16 +3,15 @@ resolver = "2"
 members = [
     "relink",
     "relink-vrf-direct-funding-proxy",
-    "relink-vrf-consumer-example",
+    "examples/relink-vrf-direct-funding-consumer"
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 
 [workspace.dependencies]
-soroban-sdk = { version = "20.0.0-rc1" }
+soroban-sdk = { version = "20.2.0" }
 relink = { path = "relink" }
-relink-vrf-direct-funding-proxy = { path = "relink-vrf-direct-funding-proxy" }
 
 [profile.release]
 opt-level = "z"

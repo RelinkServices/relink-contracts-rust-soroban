@@ -1,37 +1,32 @@
-#![cfg(test)]
-
 extern crate std;
 
 use std::println;
 
+use relink::testutils::TestOracleGenerator;
 use soroban_sdk::testutils::{
     Address as AddressTestTrait, AuthorizedFunction, AuthorizedInvocation,
 };
-use soroban_sdk::{map, token, vec, Address, BytesN, Env, IntoVal, Symbol};
+use soroban_sdk::{token, vec, Address, BytesN, Env, IntoVal, Symbol};
 
-use relink::testutils::TestSigner;
-use relink_vrf_direct_funding_proxy::{
-    RelinkVrfDirectFundingProxy, RelinkVrfDirectFundingProxyClient,
-};
+use crate::test::test_consumer::{TestConsumer, TestConsumerClient};
+use crate::{RelinkVrfDirectFundingProxy, RelinkVrfDirectFundingProxyClient};
 
-use crate::VrfDirectFundingConsumerExampleClient;
-
-pub struct Setup<'a> {
+struct Setup<'a> {
     env: Env,
     token: token::Client<'a>,
     token_admin: token::StellarAssetClient<'a>,
     token_owner: Address,
     proxy: RelinkVrfDirectFundingProxyClient<'a>,
-    consumer: VrfDirectFundingConsumerExampleClient<'a>,
+    consumer: TestConsumerClient<'a>,
 }
 
 impl Setup<'_> {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let env = Env::default();
         env.mock_all_auths();
 
         // Create the token contract
-        let token_owner = Address::random(&env);
+        let token_owner = Address::generate(&env);
         let (token, token_admin) = relink::testutils::create_token_contract(&env, &token_owner);
 
         // Create the proxy contract
@@ -39,12 +34,12 @@ impl Setup<'_> {
         let proxy = RelinkVrfDirectFundingProxyClient::new(&env, &proxy_id);
 
         // initialize proxy contract
-        let proxy_owner = Address::random(&env);
-        proxy.initialize(&proxy_owner, &token.address);
+        let proxy_owner = Address::generate(&env);
+        proxy.initialize(&proxy_owner, &token.address, &10);
 
         // Create the consumer contract
-        let consumer_id = env.register_contract(None, crate::VrfDirectFundingConsumerExample {});
-        let consumer = VrfDirectFundingConsumerExampleClient::new(&env, &consumer_id);
+        let consumer_id = env.register_contract(None, TestConsumer);
+        let consumer = TestConsumerClient::new(&env, &consumer_id);
 
         println!("token: {:?}", token.address);
         println!("token_owner: {:?}", token_owner);
@@ -62,13 +57,13 @@ impl Setup<'_> {
         }
     }
 
-    pub fn fund_account(&self, account: &Address, amount: &i128) {
+    fn fund_account(&self, account: &Address, amount: &i128) {
         // Mint some tokens to work with
         self.token_admin.mint(account, amount);
     }
 
-    pub fn random_account(&self, initial_amount: &i128) -> Address {
-        let account = Address::random(&self.env);
+    fn random_account(&self, initial_amount: &i128) -> Address {
+        let account = Address::generate(&self.env);
         self.fund_account(&account, initial_amount);
         account
     }
@@ -82,17 +77,21 @@ fn request_randomness() {
     let env = &setup.env;
 
     // generate some key pairs for oracles
-    let oracle1 = TestSigner::new();
-    let oracle2 = TestSigner::new();
-    let oracle3 = TestSigner::new();
+    let oracles = TestOracleGenerator::new().generate_sorted(env, 3);
+    let oracle1 = &oracles[0];
+    let oracle2 = &oracles[1];
+    let oracle3 = &oracles[2];
 
     // initialize consumer contract
     let oracles_pub_keys = vec![
         env,
-        oracle1.pub_key(env),
-        oracle2.pub_key(env),
-        oracle3.pub_key(env),
+        oracle1.address(env),
+        oracle2.address(env),
+        oracle3.address(env),
     ];
+    println!("oracle1 address: {}", oracle1.address(&env));
+    println!("oracle2 address: {}", oracle2.address(&env));
+    println!("oracle3 address: {}", oracle3.address(&env));
     consumer.initialize(&proxy.address, &2, &oracles_pub_keys);
 
     // initiate some requests
@@ -113,32 +112,26 @@ fn request_randomness() {
     proxy.add_backend_whitelist(&backend);
 
     // produce some randomness
-    let x = BytesN::from_array(
-        &env,
-        &[
-            0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4,
-            5, 6, 7,
-        ],
-    );
-    let random_words = vec![env, x];
-    // generate message-to-sign
-    // let domain_separator = consumer::domain_separator(&env, &consumer.address);
-    // let tx_input_hash = consumer::tx_input_hash(&env, &id1, &user, &random_words);
-    // let mut msg = Bytes::new(env);
-    // // TODO: do we also need a prefix like \x19\x01 on Ethereum
-    // msg.append(domain_separator.as_ref());
-    // msg.append(tx_input_hash.as_ref());
-    // generate oracles signatures
-    let msg = [0u8, 1, 2, 3];
-    let signatures = map![
+    let random_words = vec![
         env,
-        (oracle1.pub_key(env), oracle1.sign(env, &msg)),
-        // (oracle2.pub_key(env), oracle2.sign(env, &msg)),
-        (oracle3.pub_key(env), oracle3.sign(env, &msg)),
+        BytesN::from_array(
+            &env,
+            &[
+                0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3,
+                4, 5, 6, 7,
+            ],
+        ),
+    ];
+    // generate oracle signatures
+    let signatures = vec![
+        env,
+        oracle1.sign(&env, &consumer.address, &id1, &random_words),
+        // oracle2.sign(&env, &consumer.address, &id1, &random_words),
+        oracle3.sign(&env, &consumer.address, &id1, &random_words),
     ];
 
     // execute the callback with randomness
-    proxy.callback_with_randomness(&backend, &user, &id1, &random_words, &signatures);
+    proxy.callback_with_randomness(&backend, &id1, &random_words, &signatures);
 
     // verify that the backend's signature was checked
     assert_eq!(
@@ -155,7 +148,7 @@ fn request_randomness() {
                     // Name of the called function
                     Symbol::new(&env, "callback_with_randomness"),
                     // Arguments used to call `callback_with_randomness` (converted to the env-managed vector via `into_val`)
-                    (backend, user, id1, random_words, signatures).into_val(env),
+                    (backend, id1, random_words, signatures).into_val(env),
                 )),
                 // The contract doesn't call any other contracts that require authorization,
                 sub_invocations: std::vec![]
